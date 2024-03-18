@@ -4,18 +4,19 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class Controller {
-    int cport;
-    int r;
-    int timeout;
-    int rebalance_period;
+    private final int cport;
+    private final int r;
+    private final int timeout;
+    private final int rebalance_period;
     
-    int num_Dstores;
-    Map<Integer, List<String>> index;
+    private int num_Dstores;
+    private Map<Integer, List<String>> index;
     
     public Controller(int cport, int r, int timeout, int rebalance_period) {
         this.cport = cport;
@@ -32,13 +33,20 @@ public class Controller {
         try{
             ServerSocket ss = new ServerSocket(cport);
             for (;;) {
-                try {Socket client = ss.accept();
+                try {
+                    Socket client = ss.accept();
+                    
+                    //TODO pass the request to a new thread
                     BufferedReader in = new BufferedReader(
                         new InputStreamReader(client.getInputStream()));
                     String line;
-                    while ((line = in.readLine()) != null)
-                        System.out.println(line+" received");
+                    while ((line = in.readLine()) != null) {
+                        System.out.println(line + " received");
+                        handleRequest(line);
+                    }
+                    
                     client.close();
+                    
                 } catch (Exception e) {
                     System.out.println("error in the listening loop: "+e);
                 }
@@ -51,11 +59,14 @@ public class Controller {
     public void handleRequest(String request) {
         //TODO implement
         var requestWords = request.split(" ");
-        switch (requestWords[0]) {
-            case "JOIN":
-                //TODO implement
-                System.out.println("JOIN request received");
-                break;
+        System.out.println(requestWords[0] + ":" + requestWords[1]);
+        
+        if (requestWords[0].equals(Protocol.JOIN_TOKEN)) {
+            System.out.println("JOIN request received");
+            
+            int port = Integer.parseInt(requestWords[1]);
+            index.put(port, new ArrayList<>());
+            num_Dstores += 1;
         }
     }
     
