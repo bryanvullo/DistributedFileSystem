@@ -28,13 +28,13 @@ public class ClientMain {
 		testClient(cport, timeout, downloadFolder, uploadFolder);
 		
 		// launch a number of concurrent clients, each doing the same operations
-		for (int i = 0; i < 10; i++) {
-			new Thread() {
-				public void run() {
-					test2Client(cport, timeout, downloadFolder, uploadFolder);
-				}
-			}.start();
-		}
+//		for (int i = 0; i < 10; i++) {
+//			new Thread() {
+//				public void run() {
+//					test2Client(cport, timeout, downloadFolder, uploadFolder);
+//				}
+//			}.start();
+//		}
 	}
 	
 	public static void test2Client(int cport, int timeout, File downloadFolder, File uploadFolder) {
@@ -88,34 +88,37 @@ public class ClientMain {
 		
 			try { client.connect(); } catch(IOException e) { e.printStackTrace(); return; }
 			
-			try { list(client); } catch(IOException e) { e.printStackTrace(); }
+//			try { list(client); } catch(IOException e) { e.printStackTrace(); }
 			
 			// store first file in the to_store folder twice, then store second file in the to_store folder once
 			File fileList[] = uploadFolder.listFiles();
 			if (fileList.length > 0) {
-				try { client.store(fileList[0]); } catch(IOException e) { e.printStackTrace(); }				
+				try { client.store(fileList[0]); } catch(IOException e) { e.printStackTrace(); }
+				Thread.sleep(5000);
 				try { client.store(fileList[0]); } catch(IOException e) { e.printStackTrace(); }
 			}
 			if (fileList.length > 1) {
 				try { client.store(fileList[1]); } catch(IOException e) { e.printStackTrace(); }
 			}
 
-			String list[] = null;
-			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
-			
-			if (list != null)
-				for (String filename : list)
-					try { client.load(filename, downloadFolder); } catch(IOException e) { e.printStackTrace(); }
-			
-			if (list != null)
-				for (String filename : list)
-					try { client.remove(filename); } catch(IOException e) { e.printStackTrace(); }
-			if (list != null && list.length > 0)
-				try { client.remove(list[0]); } catch(IOException e) { e.printStackTrace(); }
-			
-			try { list(client); } catch(IOException e) { e.printStackTrace(); }
-			
-		} finally {
+//			String list[] = null;
+//			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
+//
+//			if (list != null)
+//				for (String filename : list)
+//					try { client.load(filename, downloadFolder); } catch(IOException e) { e.printStackTrace(); }
+//
+//			if (list != null)
+//				for (String filename : list)
+//					try { client.remove(filename); } catch(IOException e) { e.printStackTrace(); }
+//			if (list != null && list.length > 0)
+//				try { client.remove(list[0]); } catch(IOException e) { e.printStackTrace(); }
+//
+//			try { list(client); } catch(IOException e) { e.printStackTrace(); }
+//
+		} catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally {
 			if (client != null)
 				try { client.disconnect(); } catch(Exception e) { e.printStackTrace(); }
 		}
@@ -131,6 +134,13 @@ public class ClientMain {
 			System.out.println("[" + i++ + "] " + filename);
 		
 		return list;
+	}
+	
+    public static void store(Client client) throws IOException, NotEnoughDstoresException {
+		// store a file
+		System.out.println("Storing a file...");
+		File file = new File("test.txt");
+		client.store(file);
 	}
 	
 }
