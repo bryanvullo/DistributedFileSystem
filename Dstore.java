@@ -14,6 +14,7 @@ public class Dstore {
     int cport;
     int timeout;
     String file_folder;
+    Socket controllerSocket;
     
     public Dstore(int port, int cport, int timeout, String file_folder) {
         this.port = port;
@@ -25,16 +26,12 @@ public class Dstore {
     public void start() {
         // Start the Dstore
         try {
-            Socket socket = new Socket(InetAddress.getLocalHost(), cport);
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            controllerSocket = new Socket(InetAddress.getLocalHost(), cport);
+            PrintWriter out = new PrintWriter(controllerSocket.getOutputStream(), true);
             
             out.println(Protocol.JOIN_TOKEN + " " + port);
             
             listen();
-            
-            //testing
-            Thread.sleep(3000);
-            out.close();
             
         } catch (Exception e) {
             System.out.println("error trying to connect to Controller: " + e);
@@ -57,6 +54,7 @@ public class Dstore {
                         handleRequest(line, client);
                     }
                     
+                    System.out.println("closing connection");
                     client.close();
                     
                 } catch (Exception e) {
@@ -80,6 +78,7 @@ public class Dstore {
             
             //sending ACK
             try {
+                System.out.println("sending ACK to client");
                 PrintWriter out = new PrintWriter(client.getOutputStream(), true);
                 out.println(Protocol.ACK_TOKEN);
             } catch (Exception e) {
@@ -89,16 +88,16 @@ public class Dstore {
             //receiving the file
             var buffer = new byte[fileSize];
             try {
+                System.out.println("receiving the file from the client");
                 var in = client.getInputStream(); //using the same socket
                 buffer = in.readNBytes(fileSize);
-                
-                in.close(); //close the file stream
             } catch (Exception e) {
                 System.out.println("error receiving the file: " + e);
             }
             
             //saving the file
             try {
+                System.out.println("saving the file");
                 var out = new FileOutputStream(file_folder + "/" + fileName);
                 out.write(buffer);
                 
@@ -109,8 +108,8 @@ public class Dstore {
             
             //sending STORE_ACK
             try {
-                Socket socket = new Socket(InetAddress.getLocalHost(), cport);
-                PrintWriter out = new PrintWriter(socket.getOutputStream());
+                System.out.println("sending STORE_ACK to the Controller: " + fileName);
+                PrintWriter out = new PrintWriter(controllerSocket.getOutputStream(), true);
                 out.println(Protocol.STORE_ACK_TOKEN + " " + fileName);
             } catch (Exception e) {
                 System.out.println("error sending STORE_ACK: " + e);
@@ -119,7 +118,7 @@ public class Dstore {
     }
     
     // command promptL java Dstore port cport timeout file_folder
-    // test command prompt: java Dstore 4322 4321 1000 /tmp/dstore1
+    // test command prompt: java Dstore 4322 4321 1000 tmp/dstore1
     public static void main(String[] args) {
         //TODO validate arguments
         int port = Integer.parseInt(args[0]);
