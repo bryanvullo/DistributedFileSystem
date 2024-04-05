@@ -2,18 +2,15 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class Controller {
     
@@ -69,9 +66,7 @@ public class Controller {
     
     //any request should be sent over here
     public static void handleRequest(String request, Socket client) {
-        //TODO implement
         var requestWords = request.split(" ");
-//        System.out.println(requestWords[0] + ":" + requestWords[1]);
         
         if (requestWords[0].equals(Protocol.JOIN_TOKEN)) {
             System.out.println("JOIN request received");
@@ -131,7 +126,7 @@ public class Controller {
                 .sorted(Comparator.comparing(e -> e.getValue().size()))
                 .limit(r)
                 .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
+                .toList();
             
             //creating the string to send to Client
             var portsString = portsToStore.stream()
@@ -191,6 +186,12 @@ public class Controller {
                 var out = new PrintWriter(client.getOutputStream(), true);
                 out.println(Protocol.STORE_COMPLETE_TOKEN);
                 latches.remove(Protocol.STORE_ACK_TOKEN + " " + fileName);
+                
+                //updating the index after the file has been stored successfully
+                index.fileStatus.replace(fileName, Index.Status.STORED);
+                portsToStore.forEach(port -> index.file2ports.get(fileName).add(port));
+                portsToStore.forEach(port -> index.port2files.get(port).add(fileName));
+                
             } catch (InterruptedException e) {
                 System.err.println("error in waiting for the countdown latch: " + e);
             } catch (IOException e) {
@@ -200,12 +201,6 @@ public class Controller {
         }
         else if (requestWords[0].equals(Protocol.STORE_ACK_TOKEN)) {
             //do nothing
-//            System.out.println("STORE_ACK request received");
-//            System.out.println("from port: " + client.getPort());
-//
-//            var latch = latches.get(request);
-//            if (latch == null) System.err.println("error in finding the latch for STORE_ACK");
-//            else latch.countDown();
         }
         else {
             System.err.println("unknown request: " + requestWords[0]);
@@ -224,7 +219,7 @@ public class Controller {
                 BufferedReader in = new BufferedReader(
                     new InputStreamReader(client.getInputStream()));
                 String line;
-                Boolean isDstore = false;
+                boolean isDstore = false;
 
                 while((line = in.readLine()) != null) {
                     System.out.println(line + " received");
