@@ -1,6 +1,7 @@
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -114,6 +115,35 @@ public class Dstore {
             } catch (Exception e) {
                 System.out.println("error sending STORE_ACK: " + e);
             }
+        }
+        if (requestWords[0].equals(Protocol.LOAD_DATA_TOKEN)) {
+            System.out.println("LOAD_DATA request received");
+            
+            var fileName = requestWords[1];
+            
+            //sending the file
+            try {
+                System.out.println("sending the file " + fileName + " to the client");
+                var out = client.getOutputStream(); //using the same socket
+                var in = new File(file_folder + "/" + fileName);
+                
+                if (!in.exists()) {
+                    System.out.println("file does not exist: " + fileName);
+                    client.close();
+                    return;
+                }
+                
+                var buffer = new byte[(int) in.length()];
+                var fis = new FileInputStream(in);
+                fis.read(buffer);
+                fis.close();
+                out.write(buffer);
+            } catch (Exception e) {
+                System.out.println("error sending the file: " + e);
+            }
+        }
+        else {
+            System.out.println("unknown request received: " + request);
         }
     }
     

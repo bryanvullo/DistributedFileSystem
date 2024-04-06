@@ -108,7 +108,7 @@ public class Controller {
             var fileName = requestWords[1];
             var fileSize = Integer.parseInt(requestWords[2]);
             
-            if (index.file2ports.containsKey(fileName)) { // file already exists
+            if (index.fileStatus.containsKey(fileName)) { // file already exists
                 try {
                     var out = new PrintWriter(client.getOutputStream(), true);
                     out.println(Protocol.ERROR_FILE_ALREADY_EXISTS_TOKEN);
@@ -122,7 +122,7 @@ public class Controller {
             
             //updating the index
             index.file2ports.put(fileName, new ArrayList<>());
-            index.fileStatus.put(fileName, Index.Status.STORING);
+            index.fileStatus.put(fileName, Status.STORING);
             index.fileSizes.put(fileName, fileSize);
             
             //selecting r Dstores to store the file
@@ -198,7 +198,7 @@ public class Controller {
                 latches.remove(Protocol.STORE_ACK_TOKEN + " " + fileName);
                 
                 //updating the index after the file has been stored successfully
-                index.fileStatus.replace(fileName, Index.Status.STORED);
+                index.fileStatus.replace(fileName, Status.STORED);
                 portsToStore.forEach(port -> index.file2ports.get(fileName).add(port));
                 portsToStore.forEach(port -> index.port2files.get(port).add(fileName));
                 
@@ -230,7 +230,7 @@ public class Controller {
             //parsing the request
             var fileName = requestWords[1];
             
-            if (!index.file2ports.containsKey(fileName)) { // file does not exist
+            if (index.fileStatus.get(fileName) != Status.STORED) { // file does not exist
                 try {
                     var out = new PrintWriter(client.getOutputStream(), true);
                     out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN);
@@ -240,6 +240,77 @@ public class Controller {
                         "error in sending ERROR_FILE_DOES_NOT_EXIST request to Client: " + e);
                 }
                 return;
+            }
+            
+            //selecting r Dstores to load the file
+            var portsToLoad = index.file2ports.get(fileName);
+            var fileSize = index.fileSizes.get(fileName);
+            
+            while (!portsToLoad.isEmpty()) {
+                var port = portsToLoad.remove(0);
+                
+                try {
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    var message = Protocol.LOAD_FROM_TOKEN + " " + port + " " + fileSize;
+                    out.println(message);
+                    System.out.println("sending LOAD_FROM to the Client: " + message);
+                } catch (IOException e) {
+                    System.err.println("error in sending LOAD_FROM request to Client: " + e);
+                }
+                
+                //set time out for the client socket in case of a RELOAD request
+                try {
+                    client.setSoTimeout(timeout);
+                } catch (SocketException e) {
+                    System.err.println("error in setting the timeout for the Client: " + e);
+                }
+                
+                //if we receive RELOAD request then send the LOAD_FROM again
+                try {
+                    var in = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                    var line = in.readLine();
+                    System.out.println(line + " received");
+                    
+                    if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
+                        System.out.println("RELOAD request received, sending LOAD_FROM again");
+                    }
+                    
+                } catch (SocketTimeoutException e) {
+                    //if times out, we assume that the file has been loaded successfully
+                    System.out.println("Connection to Client timed out");
+                    return; //exit handleRequest as request has been served
+                } catch (IOException e) {
+                    System.err.println("error in the LOAD_FROM request for: " + port + e);
+                }
+                
+            }
+            
+            //if still RELOAD then send ERROR_LOAD
+            //set time out for the client socket in case of a RELOAD request
+            try {
+                client.setSoTimeout(timeout);
+            } catch (SocketException e) {
+                System.err.println("error in setting the timeout for the Client: " + e);
+            }
+            
+            //if still RELOAD then send ERROR_LOAD (no more Dstores to load the file)
+            try {
+                var in = new BufferedReader(new InputStreamReader(client.getInputStream()));
+                var line = in.readLine();
+                System.out.println(line + " received");
+                
+                if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
+                    System.out.println("RELOAD request received, sending ERROR_LOAD");
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(Protocol.ERROR_LOAD_TOKEN);
+                }
+                
+            } catch (SocketTimeoutException e) {
+                //if times out, we assume that the file has been loaded successfully
+                System.out.println("Connection to Client timed out");
+                return; //exit handleRequest as request has been served
+            } catch (IOException e) {
+                System.err.println("error in listening for RELOAD request for: " + e);
             }
         }
         else {
