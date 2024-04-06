@@ -5,6 +5,7 @@ import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -48,9 +49,9 @@ public class Controller {
     
     public void start() {
         // Start the controller
-        try{
+        try {
             ServerSocket ss = new ServerSocket(cport);
-            for (;;) {
+            for (; ; ) {
                 try {
                     Socket client = ss.accept();
                     new Thread(new ServiceThread(client)).start();
@@ -97,7 +98,8 @@ public class Controller {
                     out.println(Protocol.ERROR_NOT_ENOUGH_DSTORES_TOKEN);
                     System.out.println("Refusing request as there are not enough DStores");
                 } catch (Exception e) {
-                    System.err.println("error in sending ERROR_NOT_ENOUGH_DSTORES request to Client: " + e);
+                    System.err.println(
+                        "error in sending ERROR_NOT_ENOUGH_DSTORES request to Client: " + e);
                 }
                 return;
             }
@@ -112,7 +114,8 @@ public class Controller {
                     out.println(Protocol.ERROR_FILE_ALREADY_EXISTS_TOKEN);
                     System.out.println("Refusing request as the file already exists");
                 } catch (Exception e) {
-                    System.err.println("error in sending ERROR_FILE_ALREADY_EXISTS request to Client: " + e);
+                    System.err.println(
+                        "error in sending ERROR_FILE_ALREADY_EXISTS request to Client: " + e);
                 }
                 return;
             }
@@ -140,6 +143,8 @@ public class Controller {
                 out.println(Protocol.STORE_TO_TOKEN + " " + portsString);
             } catch (Exception e) {
                 System.err.println("error in sending STORE_TO request to Client: " + e);
+                index.fileStatus.remove(fileName);
+                index.file2ports.remove(fileName);
             }
             
             //receiving the STORE_ACK from the DStores
@@ -148,41 +153,47 @@ public class Controller {
             
             //creating latch for the STORE_ACK
             latches.put(Protocol.STORE_ACK_TOKEN + " " + fileName, countdown);
+            var storeThread = Thread.currentThread();
             portsToStore.forEach(port -> {
                 try {
                     var socket = dstoreSockets.get(port);
-                    System.out.println("test0");
                     socket.setSoTimeout(timeout);
-                    System.out.println("test1");
                     
                     //creating a thread to listen for the STORE_ACK
                     new Thread(() -> {
                         try {
-                            System.out.println("test2");
                             var in = new BufferedReader(
                                 new InputStreamReader(socket.getInputStream()));
-                            System.out.println("test3");
                             var line = in.readLine();
-                            System.out.println("test4");
                             System.out.println(line + " received in Thread " + port);
                             
                             var latch = latches.get(line);
-                            if (latch == null) System.err.println("error in finding the latch for: " + line);
-                            else latch.countDown();
+                            if (latch == null)
+                                System.err.println("error in finding the latch for: " + line);
+                            else
+                                latch.countDown();
+                        } catch (SocketTimeoutException e) {
+                            System.err.println("timeout in the STORE_ACK Thread for: " + port);
+                            storeThread.interrupt();
                         } catch (IOException e) {
                             System.err.println("error in the STORE_ACK Thread for: " + port + e);
+                            storeThread.interrupt();
                         }
                     }).start();
                     
                 } catch (SocketException e) {
-                    System.err.println("error in setting the timeout for Dstore " + port + ": " + e);
+                    System.err.println(
+                        "error in setting the timeout for Dstore " + port + ": " + e);
+                    index.fileStatus.remove(fileName);
+                    index.file2ports.remove(fileName);
                 }
             });
             
             System.out.println("Waiting for DStores to respond");
             try {
                 countdown.await();
-                System.out.println("all DStores have responded, sending STORE_COMPLETE request to Client");
+                System.out.println(
+                    "all DStores have responded, sending STORE_COMPLETE request to Client");
                 var out = new PrintWriter(client.getOutputStream(), true);
                 out.println(Protocol.STORE_COMPLETE_TOKEN);
                 latches.remove(Protocol.STORE_ACK_TOKEN + " " + fileName);
@@ -194,20 +205,26 @@ public class Controller {
                 
             } catch (InterruptedException e) {
                 System.err.println("error in waiting for the countdown latch: " + e);
+                index.fileStatus.remove(fileName);
+                index.file2ports.remove(fileName);
             } catch (IOException e) {
                 System.err.println("error in sending STORE_COMPLETE request to Client: " + e);
+                index.fileStatus.remove(fileName);
+                index.file2ports.remove(fileName);
             }
             
         }
-        else if (requestWords[0].equals(Protocol.STORE_ACK_TOKEN)) {
-            //do nothing
+        else if (requestWords[0].equals(Protocol.STORE_ACK_TOKEN)) {} //do nothing
+        else if (requestWords[0].equals(Protocol.LOAD_TOKEN)) {
+        
         }
         else {
             System.err.println("unknown request: " + requestWords[0]);
         }
     }
     
-    static class ServiceThread implements Runnable{
+    static class ServiceThread implements Runnable {
+        
         Socket client;
         
         ServiceThread(Socket c) {
@@ -220,8 +237,8 @@ public class Controller {
                     new InputStreamReader(client.getInputStream()));
                 String line;
                 boolean isDstore = false;
-
-                while((line = in.readLine()) != null) {
+                
+                while ((line = in.readLine()) != null) {
                     System.out.println(line + " received");
                     
                     if (line.split(" ")[0].equals(Protocol.JOIN_TOKEN)) {
@@ -236,9 +253,8 @@ public class Controller {
                 if (!isDstore) { //if the client is not a Dstore then close connection
                     client.close();
                 }
-            
-            }
-            catch (Exception e) {
+                
+            } catch (Exception e) {
                 System.err.println("error in the Thread listening loop:\n" + e);
                 
             }
@@ -254,7 +270,7 @@ public class Controller {
         int r = Integer.parseInt(args[1]);
         int timeout = Integer.parseInt(args[2]);
         int rebalance_period = Integer.parseInt(args[3]);
-
+        
         Controller controller = new Controller(cport, r, timeout, rebalance_period);
         controller.start();
     }
