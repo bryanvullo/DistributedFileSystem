@@ -116,7 +116,7 @@ public class Dstore {
                 System.out.println("error sending STORE_ACK: " + e);
             }
         }
-        if (requestWords[0].equals(Protocol.LOAD_DATA_TOKEN)) {
+        else if (requestWords[0].equals(Protocol.LOAD_DATA_TOKEN)) {
             System.out.println("LOAD_DATA request received");
             
             var fileName = requestWords[1];

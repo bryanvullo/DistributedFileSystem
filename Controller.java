@@ -271,6 +271,11 @@ public class Controller {
                     var line = in.readLine();
                     System.out.println(line + " received");
                     
+                    if (line == null) {
+                        System.out.println("Connection to Client closed");
+                        return; //exit handleRequest as request has been served
+                    }
+                    
                     if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
                         System.out.println("RELOAD request received, sending LOAD_FROM again");
                     }
@@ -298,6 +303,11 @@ public class Controller {
                 var in = new BufferedReader(new InputStreamReader(client.getInputStream()));
                 var line = in.readLine();
                 System.out.println(line + " received");
+                
+                if (line == null) {
+                    System.out.println("Connection to Client closed");
+                    return; //exit handleRequest as request has been served
+                }
                 
                 if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
                     System.out.println("RELOAD request received, sending ERROR_LOAD");
