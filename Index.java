@@ -16,9 +16,6 @@ public class Index {
         this.fileSizes = new HashMap<>();
     }
     
-    public enum Status {
-        STORING, REMOVING, STORED, REMOVED
-    }
     
     public void removeFileStoreFailed(String fileName) {
         fileStatus.remove(fileName);
