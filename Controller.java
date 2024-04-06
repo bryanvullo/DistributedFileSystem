@@ -123,6 +123,7 @@ public class Controller {
             //updating the index
             index.file2ports.put(fileName, new ArrayList<>());
             index.fileStatus.put(fileName, Index.Status.STORING);
+            index.fileSizes.put(fileName, fileSize);
             
             //selecting r Dstores to store the file
             var portsToStore = index.port2files.entrySet().stream()
@@ -143,8 +144,7 @@ public class Controller {
                 out.println(Protocol.STORE_TO_TOKEN + " " + portsString);
             } catch (Exception e) {
                 System.err.println("error in sending STORE_TO request to Client: " + e);
-                index.fileStatus.remove(fileName);
-                index.file2ports.remove(fileName);
+                index.removeFileStoreFailed(fileName);
             }
             
             //receiving the STORE_ACK from the DStores
@@ -184,8 +184,7 @@ public class Controller {
                 } catch (SocketException e) {
                     System.err.println(
                         "error in setting the timeout for Dstore " + port + ": " + e);
-                    index.fileStatus.remove(fileName);
-                    index.file2ports.remove(fileName);
+                    index.removeFileStoreFailed(fileName);
                 }
             });
             
@@ -205,18 +204,43 @@ public class Controller {
                 
             } catch (InterruptedException e) {
                 System.err.println("error in waiting for the countdown latch: " + e);
-                index.fileStatus.remove(fileName);
-                index.file2ports.remove(fileName);
+                index.removeFileStoreFailed(fileName);
             } catch (IOException e) {
                 System.err.println("error in sending STORE_COMPLETE request to Client: " + e);
-                index.fileStatus.remove(fileName);
-                index.file2ports.remove(fileName);
+                index.removeFileStoreFailed(fileName);
             }
             
         }
         else if (requestWords[0].equals(Protocol.STORE_ACK_TOKEN)) {} //do nothing
         else if (requestWords[0].equals(Protocol.LOAD_TOKEN)) {
-        
+            System.out.println("LOAD request received");
+            
+            if (num_Dstores < r) { // not enough Dstores to load the file
+                try {
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(Protocol.ERROR_NOT_ENOUGH_DSTORES_TOKEN);
+                    System.out.println("Refusing request as there are not enough DStores");
+                } catch (Exception e) {
+                    System.err.println(
+                        "error in sending ERROR_NOT_ENOUGH_DSTORES request to Client: " + e);
+                }
+                return;
+            }
+            
+            //parsing the request
+            var fileName = requestWords[1];
+            
+            if (!index.file2ports.containsKey(fileName)) { // file does not exist
+                try {
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN);
+                    System.out.println("Refusing request as the file does not exist");
+                } catch (Exception e) {
+                    System.err.println(
+                        "error in sending ERROR_FILE_DOES_NOT_EXIST request to Client: " + e);
+                }
+                return;
+            }
         }
         else {
             System.err.println("unknown request: " + requestWords[0]);
