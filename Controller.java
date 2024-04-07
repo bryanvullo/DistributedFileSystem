@@ -400,10 +400,17 @@ public class Controller {
                             System.out.println(line + " received in Thread " + port);
                             
                             var latch = latches.get(line);
-                            if (latch == null)
-                                System.err.println("error in finding the latch for: " + line);
-                            else
+                            if (latch != null) { //if the latch is found
                                 latch.countDown();
+                            }
+                            else if (line.equals(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + fileName)) {
+                                System.out.println(fileName + " does not exist in Dstore " + port);
+                                latch = latches.get(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
+                                if (latch != null) latch.countDown();
+                            }
+                            else {
+                                System.err.println("error in finding the latch for: " + line);
+                            }
                         } catch (SocketTimeoutException e) {
                             System.err.println("timeout in the REMOVE_ACK Thread for: " + port);
                             removeThread.interrupt();
