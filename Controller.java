@@ -323,6 +323,115 @@ public class Controller {
                 System.err.println("error in listening for RELOAD request for: " + e);
             }
         }
+        else if (requestWords[0].equals(Protocol.REMOVE_TOKEN)) {
+            System.out.println("REMOVE request received");
+            
+            if (num_Dstores < r) { // not enough Dstores to remove the file
+                try {
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(Protocol.ERROR_NOT_ENOUGH_DSTORES_TOKEN);
+                    System.out.println("Refusing request as there are not enough DStores");
+                } catch (Exception e) {
+                    System.err.println(
+                        "error in sending ERROR_NOT_ENOUGH_DSTORES request to Client: " + e);
+                }
+                return;
+            }
+            
+            //parsing the request
+            var fileName = requestWords[1];
+            
+            if (index.fileStatus.get(fileName) != Status.STORED) { // file does not exist
+                try {
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN);
+                    System.out.println("Refusing request as the file does not exist");
+                } catch (Exception e) {
+                    System.err.println(
+                        "error in sending ERROR_FILE_DOES_NOT_EXIST request to Client: " + e);
+                }
+                return;
+            }
+            
+            //updating the index
+            index.fileStatus.replace(fileName, Status.REMOVING);
+            
+            //getting the r DStores to remove the file from
+            var portsToRemove = index.file2ports.get(fileName);
+            
+            //setting up the latch for the REMOVE_ACK
+            System.out.println("setting up the countdown latch for REMOVE_ACK");
+            var countdown = new CountDownLatch(r); //countdown latch
+            latches.put(Protocol.REMOVE_ACK_TOKEN + " " + fileName, countdown);
+            
+            //removing from DStores
+            //request
+            var removeThread = Thread.currentThread();
+            portsToRemove.forEach(port -> { //make a thread for each Dstore
+                try {
+                    var socket = dstoreSockets.get(port);
+                    socket.setSoTimeout(timeout);
+                    
+                    new Thread(() -> {
+                        //sending the REMOVE request
+                        try {
+                            var out = new PrintWriter(socket.getOutputStream(), true);
+                            out.println(request);
+                            System.out.println("sending REMOVE to Dstore " + port);
+                        } catch (IOException e) {
+                            System.err.println("error in sending REMOVE request to Dstore " + port + ": " + e);
+                            removeThread.interrupt();
+                        }
+                        
+                        //listening for the REMOVE_ACK
+                        try {
+                            var in = new BufferedReader(
+                                new InputStreamReader(socket.getInputStream()));
+                            var line = in.readLine();
+                            System.out.println(line + " received in Thread " + port);
+                            
+                            var latch = latches.get(line);
+                            if (latch == null)
+                                System.err.println("error in finding the latch for: " + line);
+                            else
+                                latch.countDown();
+                        } catch (SocketTimeoutException e) {
+                            System.err.println("timeout in the REMOVE_ACK Thread for: " + port);
+                            removeThread.interrupt();
+                        } catch (IOException e) {
+                            System.err.println("error in the REMOVE_ACK Thread for: " + port + e);
+                            removeThread.interrupt();
+                        }
+                    }).start();
+                } catch (IOException e) {
+                    System.err.println("error in sending REMOVE request to Dstore " + port + ": " + e);
+                }
+            });
+            
+            //waiting for all the REMOVE_ACK
+            System.out.println("Waiting for DStores to respond");
+            try {
+                countdown.await();
+                System.out.println("all DStores have responded");
+                
+                //updating the index after the file has been removed successfully
+                System.out.println("updating the index after the file has been removed successfully");
+                index.removeFileRemoveComplete(fileName);
+                portsToRemove.forEach(port -> index.port2files.get(port).remove(fileName));
+                
+                //sending REMOVE_COMPLETE request to the Client
+                System.out.println("sending REMOVE_COMPLETE request to Client");
+                var out = new PrintWriter(client.getOutputStream(), true);
+                out.println(Protocol.REMOVE_COMPLETE_TOKEN);
+                latches.remove(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
+                
+            } catch (InterruptedException e) {
+                System.err.println("error in waiting for the countdown latch: " + e);
+            } catch (IOException e) {
+                System.err.println("error in sending REMOVE_COMPLETE request to Client: " + e);
+            }
+            
+        }
         else {
             System.err.println("unknown request: " + requestWords[0]);
         }

@@ -1,10 +1,9 @@
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -141,6 +140,30 @@ public class Dstore {
             } catch (Exception e) {
                 System.out.println("error sending the file: " + e);
             }
+        }
+        else if (requestWords[0].equals(Protocol.REMOVE_TOKEN)) {
+            System.out.println("REMOVE request received");
+            
+            var fileName = requestWords[1];
+            
+            //removing the file
+            try {
+                System.out.println("removing the file " + fileName);
+                var out = new PrintWriter(controllerSocket.getOutputStream(), true);
+                var in = new File(file_folder + "/" + fileName);
+                
+                if (!in.exists()) {
+                    System.out.println("file does not exist: " + fileName);
+                    out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + fileName);
+                } else {
+                    in.delete();
+                    out.println(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
+                }
+                
+            } catch (IOException e) {
+                System.out.println("error removing the file: " + e);
+            }
+            
         }
         else {
             System.out.println("unknown request received: " + request);
