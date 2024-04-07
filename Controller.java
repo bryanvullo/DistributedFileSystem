@@ -243,7 +243,8 @@ public class Controller {
             }
             
             //selecting r Dstores to load the file
-            var portsToLoad = index.file2ports.get(fileName);
+            var ports = index.file2ports.get(fileName);
+            var portsToLoad = new ArrayList<>(ports); //copy of the list
             var fileSize = index.fileSizes.get(fileName);
             
             while (!portsToLoad.isEmpty()) {
@@ -275,9 +276,12 @@ public class Controller {
                         System.out.println("Connection to Client closed");
                         return; //exit handleRequest as request has been served
                     }
-                    
-                    if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
+                    else if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
                         System.out.println("RELOAD request received, sending LOAD_FROM again");
+                    }
+                    else {
+                        //client has received the file and has sent a new request
+                        handleRequest(line, client);
                     }
                     
                 } catch (SocketTimeoutException e) {
@@ -308,11 +312,14 @@ public class Controller {
                     System.out.println("Connection to Client closed");
                     return; //exit handleRequest as request has been served
                 }
-                
-                if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
+                else if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
                     System.out.println("RELOAD request received, sending ERROR_LOAD");
                     var out = new PrintWriter(client.getOutputStream(), true);
                     out.println(Protocol.ERROR_LOAD_TOKEN);
+                }
+                else {
+                    //client has received the file and has sent a new request
+                    handleRequest(line, client);
                 }
                 
             } catch (SocketTimeoutException e) {
@@ -365,9 +372,9 @@ public class Controller {
             latches.put(Protocol.REMOVE_ACK_TOKEN + " " + fileName, countdown);
             
             //removing from DStores
-            //request
             var removeThread = Thread.currentThread();
             portsToRemove.forEach(port -> { //make a thread for each Dstore
+                System.out.println("setting up the Thread for Dstore " + port);
                 try {
                     var socket = dstoreSockets.get(port);
                     socket.setSoTimeout(timeout);
@@ -385,6 +392,7 @@ public class Controller {
                         
                         //listening for the REMOVE_ACK
                         try {
+                            System.out.println("listening for REMOVE_ACK from Dstore " + port);
                             var in = new BufferedReader(
                                 new InputStreamReader(socket.getInputStream()));
                             var line = in.readLine();
@@ -426,7 +434,7 @@ public class Controller {
                 latches.remove(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
                 
             } catch (InterruptedException e) {
-                System.err.println("error in waiting for the countdown latch: " + e);
+                System.err.println("All DStores did not respond in time: " + e);
             } catch (IOException e) {
                 System.err.println("error in sending REMOVE_COMPLETE request to Client: " + e);
             }

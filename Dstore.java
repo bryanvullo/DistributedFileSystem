@@ -31,6 +31,8 @@ public class Dstore {
             
             out.println(Protocol.JOIN_TOKEN + " " + port);
             
+            new Thread(this::listenToController).start();
+            
             listen();
             
         } catch (Exception e) {
@@ -38,8 +40,25 @@ public class Dstore {
         }
     }
     
+    public void listenToController() {
+        // listen for incoming requests from the controller
+        for (;;) {
+            try {
+                BufferedReader in = new BufferedReader(
+                    new InputStreamReader(controllerSocket.getInputStream()));
+                String line;
+                while ((line = in.readLine()) != null) {
+                    System.out.println(line + " received from Controller");
+                    handleRequest(line, controllerSocket);
+                }
+            } catch (Exception e) {
+                System.err.println("error in the listening loop for Controller:\n" + e);
+            }
+        }
+    }
+    
     public void listen() {
-        // listen for incoming connections
+        // listen for incoming connections from clients
         try {
             ServerSocket socket = new ServerSocket(port);
             for (;;) {
@@ -148,7 +167,6 @@ public class Dstore {
             
             //removing the file
             try {
-                System.out.println("removing the file " + fileName);
                 var out = new PrintWriter(controllerSocket.getOutputStream(), true);
                 var in = new File(file_folder + "/" + fileName);
                 
@@ -156,6 +174,7 @@ public class Dstore {
                     System.out.println("file does not exist: " + fileName);
                     out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + fileName);
                 } else {
+                    System.out.println("file exists: " + fileName + ", removing it");
                     in.delete();
                     out.println(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
                 }
