@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class Controller {
     
@@ -437,6 +438,43 @@ public class Controller {
                 System.err.println("All DStores did not respond in time: " + e);
             } catch (IOException e) {
                 System.err.println("error in sending REMOVE_COMPLETE request to Client: " + e);
+            }
+            
+        }
+        else if (requestWords[0].equals(Protocol.LIST_TOKEN)) {
+            System.out.println("LIST request received");
+            
+            if (num_Dstores < r) { // not enough Dstores to remove the file
+                try {
+                    var out = new PrintWriter(client.getOutputStream(), true);
+                    out.println(Protocol.ERROR_NOT_ENOUGH_DSTORES_TOKEN);
+                    System.out.println("Refusing request as there are not enough DStores");
+                } catch (Exception e) {
+                    System.err.println(
+                        "error in sending ERROR_NOT_ENOUGH_DSTORES message to Client: " + e);
+                }
+                return;
+            }
+            
+            //creating the string to send to Client
+            var filesString = index.fileStatus.entrySet().stream()
+                .filter(e -> e.getValue() == Status.STORED)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.joining(" "));
+            
+            try {
+                var out = new PrintWriter(client.getOutputStream(), true);
+                
+                if (filesString.isEmpty()) {
+                    System.out.println("sending an empty list of files to the Client");
+                    out.println(Protocol.LIST_TOKEN);
+                }
+                else {
+                    System.out.println("sending the list of files to the Client");
+                    out.println(Protocol.LIST_TOKEN + " " + filesString);
+                }
+            } catch (Exception e) {
+                System.err.println("error in sending the list of files to the Client: " + e);
             }
             
         }
