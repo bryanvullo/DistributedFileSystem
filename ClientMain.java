@@ -105,8 +105,8 @@ public class ClientMain {
 			try { client.load(fileList[0].getName(), downloadFolder); } catch(IOException e) { e.printStackTrace(); }
 			try { client.remove(fileList[0].getName()); } catch(IOException e) { e.printStackTrace(); }
 
-//			String list[] = null;
-//			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
+			String list[] = null;
+			try { list = list(client); } catch(IOException e) { e.printStackTrace(); }
 //
 //			if (list != null)
 //				for (String filename : list)
