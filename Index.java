@@ -22,4 +22,10 @@ public class Index {
         fileSizes.remove(fileName);
         file2ports.remove(fileName);
     }
+    
+    public void removeFileRemoveComplete(String fileName) {
+        fileStatus.remove(fileName);
+        fileSizes.remove(fileName);
+        file2ports.remove(fileName);
+    }
 }
