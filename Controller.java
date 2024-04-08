@@ -108,22 +108,24 @@ public class Controller {
             var fileName = requestWords[1];
             var fileSize = Integer.parseInt(requestWords[2]);
             
-            if (index.fileStatus.containsKey(fileName)) { // file already exists
-                try {
-                    var out = new PrintWriter(client.getOutputStream(), true);
-                    out.println(Protocol.ERROR_FILE_ALREADY_EXISTS_TOKEN);
-                    System.out.println("Refusing request as the file already exists");
-                } catch (Exception e) {
-                    System.err.println(
-                        "error in sending ERROR_FILE_ALREADY_EXISTS request to Client: " + e);
+            synchronized (index) {
+                if (index.fileStatus.containsKey(fileName)) { // file already exists
+                    try {
+                        var out = new PrintWriter(client.getOutputStream(), true);
+                        out.println(Protocol.ERROR_FILE_ALREADY_EXISTS_TOKEN);
+                        System.out.println("Refusing request as the file already exists");
+                    } catch (Exception e) {
+                        System.err.println(
+                            "error in sending ERROR_FILE_ALREADY_EXISTS request to Client: " + e);
+                    }
+                    return;
                 }
-                return;
+                
+                //updating the index
+                index.file2ports.put(fileName, new ArrayList<>());
+                index.fileStatus.put(fileName, Status.STORING);
+                index.fileSizes.put(fileName, fileSize);
             }
-            
-            //updating the index
-            index.file2ports.put(fileName, new ArrayList<>());
-            index.fileStatus.put(fileName, Status.STORING);
-            index.fileSizes.put(fileName, fileSize);
             
             //selecting r Dstores to store the file
             var portsToStore = index.port2files.entrySet().stream()
