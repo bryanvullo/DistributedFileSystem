@@ -291,6 +291,7 @@ public class Controller {
                     else {
                         //client has received the file and has sent a new request
                         handleRequest(line, client);
+                        return;
                     }
                     
                 } catch (SocketTimeoutException e) {
