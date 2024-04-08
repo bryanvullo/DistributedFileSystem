@@ -376,6 +376,12 @@ public class Controller {
                             if (latch != null) { //if the latch is found
                                 latch.countDown();
                             }
+                            else if (line == null) {
+                                System.out.println("Connection to Dstore " + port + " lost, "
+                                    + "not waiting for REMOVE_ACK");
+                                latch = latches.get(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
+                                if (latch != null) latch.countDown();
+                            }
                             else if (line.equals(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + fileName)) {
                                 System.out.println(fileName + " does not exist in Dstore " + port);
                                 latch = latches.get(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
