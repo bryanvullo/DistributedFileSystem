@@ -65,16 +65,7 @@ public class Dstore {
                 try {
                     Socket client = socket.accept();
                     
-                    BufferedReader in = new BufferedReader(
-                        new InputStreamReader(client.getInputStream()));
-                    String line;
-                    while ((line = in.readLine()) != null) {
-                        System.out.println(line + " received");
-                        handleRequest(line, client);
-                    }
-                    
-                    System.out.println("closing connection");
-                    client.close();
+                    new Thread(new ClientThread(client)).start();
                     
                 } catch (Exception e) {
                     System.err.println("error in the listening loop:\n" + e);
@@ -186,6 +177,31 @@ public class Dstore {
         }
         else {
             System.out.println("unknown request received: " + request);
+        }
+    }
+    
+     class ClientThread implements Runnable {
+        Socket client;
+        
+        public ClientThread(Socket client) {
+            this.client = client;
+        }
+        
+        @Override
+        public void run() {
+            try {
+                BufferedReader in = new BufferedReader(
+                    new InputStreamReader(client.getInputStream()));
+                String line;
+                while ((line = in.readLine()) != null) {
+                    System.out.println(line + " received");
+                    handleRequest(line, client);
+                }
+                client.close();
+            } catch (Exception e) {
+                System.err.println("error in the listening loop for client:"
+                    + client.getPort() + "\n" + e);
+            }
         }
     }
     
