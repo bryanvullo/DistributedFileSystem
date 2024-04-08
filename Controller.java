@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class Controller {
     
@@ -278,6 +277,13 @@ public class Controller {
                         return; //exit handleRequest as request has been served
                     }
                     else if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
+                        if (portsToLoad.isEmpty()) {
+                            System.out.println("RELOAD request received. "
+                                + "No more DStores Available, sending ERROR_LOAD");
+                            var out = new PrintWriter(client.getOutputStream(), true);
+                            out.println(Protocol.ERROR_LOAD_TOKEN);
+                            return;
+                        }
                         System.out.println("RELOAD request received, sending LOAD_FROM again");
                     }
                     else {
@@ -292,44 +298,8 @@ public class Controller {
                 } catch (IOException e) {
                     System.err.println("error in the LOAD_FROM request for: " + port + e);
                 }
-                
             }
             
-            //if still RELOAD then send ERROR_LOAD
-            //set time out for the client socket in case of a RELOAD request
-            try {
-                client.setSoTimeout(timeout);
-            } catch (SocketException e) {
-                System.err.println("error in setting the timeout for the Client: " + e);
-            }
-            
-            //if still RELOAD then send ERROR_LOAD (no more Dstores to load the file)
-            try {
-                var in = new BufferedReader(new InputStreamReader(client.getInputStream()));
-                var line = in.readLine();
-                System.out.println(line + " received");
-                
-                if (line == null) {
-                    System.out.println("Connection to Client closed");
-                    return; //exit handleRequest as request has been served
-                }
-                else if (line.equals(Protocol.RELOAD_TOKEN + " " + fileName)) {
-                    System.out.println("RELOAD request received, sending ERROR_LOAD");
-                    var out = new PrintWriter(client.getOutputStream(), true);
-                    out.println(Protocol.ERROR_LOAD_TOKEN);
-                }
-                else {
-                    //client has received the file and has sent a new request
-                    handleRequest(line, client);
-                }
-                
-            } catch (SocketTimeoutException e) {
-                //if times out, we assume that the file has been loaded successfully
-                System.out.println("Connection to Client timed out");
-                return; //exit handleRequest as request has been served
-            } catch (IOException e) {
-                System.err.println("error in listening for RELOAD request for: " + e);
-            }
         }
         else if (requestWords[0].equals(Protocol.REMOVE_TOKEN)) {
             System.out.println("REMOVE request received");
