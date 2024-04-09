@@ -169,9 +169,16 @@ public class Controller {
                             var line = in.readLine();
                             System.out.println(line + " received in Thread " + port);
                             
+                            if (line == null) {
+                                System.out.println("Connection to Dstore " + port + " lost, "
+                                    + "not waiting for STORE_ACK");
+                                new Thread(() -> index.removePort(port)).start();
+                                num_Dstores -= 1;
+                            }
+                            
                             var latch = latches.get(line);
                             if (latch == null)
-                                System.err.println("error in finding the latch for: " + line);
+                                throw new IOException("error in finding the latch for: " + line);
                             else
                                 latch.countDown();
                         } catch (SocketTimeoutException e) {
