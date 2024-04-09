@@ -193,16 +193,17 @@ public class Controller {
             System.out.println("Waiting for DStores to respond");
             try {
                 countdown.await();
-                System.out.println(
-                    "all DStores have responded, sending STORE_COMPLETE request to Client");
-                var out = new PrintWriter(client.getOutputStream(), true);
-                out.println(Protocol.STORE_COMPLETE_TOKEN);
-                latches.remove(Protocol.STORE_ACK_TOKEN + " " + fileName);
                 
                 //updating the index after the file has been stored successfully
                 index.fileStatus.replace(fileName, Status.STORED);
                 portsToStore.forEach(port -> index.file2ports.get(fileName).add(port));
                 portsToStore.forEach(port -> index.port2files.get(port).add(fileName));
+                latches.remove(Protocol.STORE_ACK_TOKEN + " " + fileName);
+                
+                System.out.println(
+                    "all DStores have responded, sending STORE_COMPLETE request to Client");
+                var out = new PrintWriter(client.getOutputStream(), true);
+                out.println(Protocol.STORE_COMPLETE_TOKEN);
                 
             } catch (InterruptedException e) {
                 System.err.println("error in waiting for the countdown latch: " + e);
