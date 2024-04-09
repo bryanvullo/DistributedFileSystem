@@ -28,4 +28,19 @@ public class Index {
         fileSizes.remove(fileName);
         file2ports.remove(fileName);
     }
+    
+    public void removePort(int port) {
+        List<String> files = port2files.get(port);
+        if (files != null) {
+            for (String file : files) {
+                file2ports.get(file).remove(port);
+                if (file2ports.get(file).isEmpty()) {
+                    file2ports.remove(file);
+                    fileStatus.remove(file);
+                    fileSizes.remove(file);
+                }
+            }
+            port2files.remove(port);
+        }
+    }
 }
