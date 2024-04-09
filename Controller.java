@@ -214,7 +214,6 @@ public class Controller {
             }
             
         }
-        else if (requestWords[0].equals(Protocol.STORE_ACK_TOKEN)) {} //do nothing
         else if (requestWords[0].equals(Protocol.LOAD_TOKEN)) {
             System.out.println("LOAD request received");
             
@@ -323,20 +322,22 @@ public class Controller {
             //parsing the request
             var fileName = requestWords[1];
             
-            if (index.fileStatus.get(fileName) != Status.STORED) { // file does not exist
-                try {
-                    var out = new PrintWriter(client.getOutputStream(), true);
-                    out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN);
-                    System.out.println("Refusing request as the file does not exist");
-                } catch (Exception e) {
-                    System.err.println(
-                        "error in sending ERROR_FILE_DOES_NOT_EXIST request to Client: " + e);
+            synchronized (index) {
+                if (index.fileStatus.get(fileName) != Status.STORED) { // file does not exist
+                    try {
+                        var out = new PrintWriter(client.getOutputStream(), true);
+                        out.println(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN);
+                        System.out.println("Refusing request as the file does not exist");
+                    } catch (Exception e) {
+                        System.err.println(
+                            "error in sending ERROR_FILE_DOES_NOT_EXIST request to Client: " + e);
+                    }
+                    return;
                 }
-                return;
+                
+                //updating the index
+                index.fileStatus.replace(fileName, Status.REMOVING);
             }
-            
-            //updating the index
-            index.fileStatus.replace(fileName, Status.REMOVING);
             
             //getting the r DStores to remove the file from
             var portsToRemove = index.file2ports.get(fileName);
@@ -380,6 +381,9 @@ public class Controller {
                             else if (line == null) {
                                 System.out.println("Connection to Dstore " + port + " lost, "
                                     + "not waiting for REMOVE_ACK");
+                                new Thread(() -> index.removePort(port)).start();
+                                num_Dstores -= 1;
+                                portsToRemove.remove(port);
                                 latch = latches.get(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
                                 if (latch != null) latch.countDown();
                             }
@@ -466,7 +470,7 @@ public class Controller {
             
         }
         else {
-            System.err.println("unknown request: " + requestWords[0]);
+            System.err.println("Unknown Request: " + requestWords[0]);
         }
     }
     
