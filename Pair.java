@@ -31,4 +31,18 @@ public class Pair<F, S> {
     public S getSecond() {
         return second;
     }
+    
+    /**
+     * @param first the first element to set
+     */
+    public void setFirst(F first) {
+        this.first = first;
+    }
+    
+    /**
+     * @param second the second element to set
+     */
+    public void setSecond(S second) {
+        this.second = second;
+    }
 }
