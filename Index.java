@@ -1,3 +1,4 @@
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ public class Index {
         fileStatus.remove(fileName);
         fileSizes.remove(fileName);
         file2ports.remove(fileName);
+        port2files.values().forEach(files -> files.remove(fileName));
     }
     
     public void removePort(int port) {
@@ -41,6 +43,21 @@ public class Index {
                 }
             }
             port2files.remove(port);
+        }
+    }
+    
+    public void update(HashMap<Integer, List<String>> dstoreFiles) {
+        port2files = dstoreFiles;
+        file2ports.clear();
+        fileStatus.clear();
+        for (var entry : dstoreFiles.entrySet()) {
+            var port = entry.getKey();
+            var files = entry.getValue();
+            for (var file : files) {
+                file2ports.putIfAbsent(file, new ArrayList<>());
+                file2ports.get(file).add(port);
+                fileStatus.putIfAbsent(file, Status.STORED);
+            }
         }
     }
 }
