@@ -1,3 +1,5 @@
+import static java.util.Collection.*;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -7,9 +9,17 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 
@@ -25,7 +35,7 @@ public class Controller {
     private static int timeout;
     
     // time interval for rebalancing
-    private final int rebalance_period;
+    private static int rebalance_period;
     
     // number of Dstores connected
     private static int num_Dstores;
@@ -34,12 +44,16 @@ public class Controller {
     private static Index index;
     private static Map<Integer, Socket> dstoreSockets;
     private static HashMap<String, CountDownLatch> latches; //latch, token expected, ports expected
+    private static List<ServiceThread> threads;
+    
+    private static Timer rebalanceTimer;
+    private static TimerTask rebalanceTask;
     
     public Controller(int cport, int r, int timeout, int rebalance_period) {
         Controller.cport = cport;
         Controller.r = r;
         Controller.timeout = timeout;
-        this.rebalance_period = rebalance_period;
+        Controller.rebalance_period = rebalance_period;
         
         Controller.num_Dstores = 0;
         Controller.index = new Index();
@@ -48,13 +62,26 @@ public class Controller {
     }
     
     public void start() {
+        //set the rebalance scheduled task
+        rebalanceTimer = new Timer();
+        rebalanceTask = new TimerTask() {
+            @Override
+            public void run() {
+                rebalance();
+            }
+        };
+        rebalanceTimer.scheduleAtFixedRate(rebalanceTask, 0, rebalance_period);
+        
         // Start the controller
         try {
             ServerSocket ss = new ServerSocket(cport);
+            threads = new ArrayList<>();
             for (; ; ) {
                 try {
                     Socket client = ss.accept();
-                    new Thread(new ServiceThread(client)).start();
+                    var thread = new ServiceThread(client);
+                    threads.add(thread);
+                    thread.start();
                     
                 } catch (Exception e) {
                     System.err.println("error in the listening loop:\n" + e);
@@ -86,11 +113,15 @@ public class Controller {
             System.out.println("Dstore " + port + " joined");
             if (num_Dstores > r) {
                 System.out.println("Rebalancing...");
-                //TODO implement rebalancing
+                rebalanceTimer.cancel();
+                rebalanceTimer.purge();
+                rebalanceTask.run();
+                rebalanceTimer.scheduleAtFixedRate(rebalanceTask, 0, rebalance_period);
             }
-        }
-        else if (requestWords[0].equals(Protocol.STORE_TOKEN)) {
+        } else if (requestWords[0].equals(Protocol.STORE_TOKEN)) {
             System.out.println("STORE request received");
+            var thread = (ServiceThread) Thread.currentThread();
+            thread.ongoingCriticalOperation = true;
             
             if (num_Dstores < r) { // not enough Dstores to store the file
                 try {
@@ -172,8 +203,7 @@ public class Controller {
                             if (line == null) {
                                 System.out.println("Connection to Dstore " + port + " lost, "
                                     + "not waiting for STORE_ACK");
-                                new Thread(() -> index.removePort(port)).start();
-                                num_Dstores -= 1;
+                                removeDstore(port);
                             }
                             
                             var latch = latches.get(line);
@@ -313,6 +343,8 @@ public class Controller {
         }
         else if (requestWords[0].equals(Protocol.REMOVE_TOKEN)) {
             System.out.println("REMOVE request received");
+            var thread = (ServiceThread) Thread.currentThread();
+            thread.ongoingCriticalOperation = true;
             
             if (num_Dstores < r) { // not enough Dstores to remove the file
                 try {
@@ -369,7 +401,8 @@ public class Controller {
                             out.println(request);
                             System.out.println("sending REMOVE to Dstore " + port);
                         } catch (IOException e) {
-                            System.err.println("error in sending REMOVE request to Dstore " + port + ": " + e);
+                            System.err.println(
+                                "error in sending REMOVE request to Dstore " + port + ": " + e);
                             removeThread.interrupt();
                         }
                         
@@ -384,22 +417,21 @@ public class Controller {
                             var latch = latches.get(line);
                             if (latch != null) { //if the latch is found
                                 latch.countDown();
-                            }
-                            else if (line == null) {
+                            } else if (line == null) {
                                 System.out.println("Connection to Dstore " + port + " lost, "
                                     + "not waiting for REMOVE_ACK");
-                                new Thread(() -> index.removePort(port)).start();
-                                num_Dstores -= 1;
+                                removeDstore(port);
                                 portsToRemove.remove(port);
                                 latch = latches.get(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
-                                if (latch != null) latch.countDown();
-                            }
-                            else if (line.equals(Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + fileName)) {
+                                if (latch != null)
+                                    latch.countDown();
+                            } else if (line.equals(
+                                Protocol.ERROR_FILE_DOES_NOT_EXIST_TOKEN + " " + fileName)) {
                                 System.out.println(fileName + " does not exist in Dstore " + port);
                                 latch = latches.get(Protocol.REMOVE_ACK_TOKEN + " " + fileName);
-                                if (latch != null) latch.countDown();
-                            }
-                            else {
+                                if (latch != null)
+                                    latch.countDown();
+                            } else {
                                 System.err.println("error in finding the latch for: " + line);
                             }
                         } catch (SocketTimeoutException e) {
@@ -411,7 +443,8 @@ public class Controller {
                         }
                     }).start();
                 } catch (IOException e) {
-                    System.err.println("error in sending REMOVE request to Dstore " + port + ": " + e);
+                    System.err.println(
+                        "error in sending REMOVE request to Dstore " + port + ": " + e);
                 }
             });
             
@@ -422,7 +455,8 @@ public class Controller {
                 System.out.println("all DStores have responded");
                 
                 //updating the index after the file has been removed successfully
-                System.out.println("updating the index after the file has been removed successfully");
+                System.out.println(
+                    "updating the index after the file has been removed successfully");
                 index.removeFileRemoveComplete(fileName);
                 portsToRemove.forEach(port -> index.port2files.get(port).remove(fileName));
                 
@@ -481,9 +515,432 @@ public class Controller {
         }
     }
     
-    static class ServiceThread implements Runnable {
+    public void rebalance() {
+        //TODO implement rebalancing
+        // pre. wait for all ongoing store/remove operations to finish [/]
+        // 1. list sent to all dstores [/]
+        // 2. revise file allocation
+        //  2.1. if file in index but not in dstores, remove from index
+        //  2.2. if file in dstore but not in index, remove from dstore
+        // 3. tell dstores to send/remove files
+        // 4. Dstores do their thing and wait for acks (if no complete acks, timeout, next rebalance)
+        
+        if (num_Dstores < r) {
+            System.out.println("Not enough Dstores to Rebalance");
+            return;
+        }
+        
+        // wait for all ongoing store/remove operations to finish
+        for (var thread : threads) {
+            thread.ongoingRebalance = true;
+            while (thread.ongoingCriticalOperation) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    System.err.println("interrupted rebalance: " + e);
+                }
+            }
+        }
+        
+        // set up for LIST
+        var rebalanceThread = Thread.currentThread();
+        var countdown = new CountDownLatch(num_Dstores); //countdown latch
+        latches.put(Protocol.LIST_TOKEN, countdown);
+        var fileList = new ArrayList<String>();
+        var dstoreFiles = new HashMap<Integer, List<String>>();
+        
+        //list sent to all Dstores
+        for (var port : dstoreSockets.keySet()) {
+            new Thread(() -> {
+                try {
+                    var socket = dstoreSockets.get(port);
+                    socket.setSoTimeout(timeout);
+                    
+                    System.out.println("sending LIST request to Dstore: " + port);
+                    try {
+                        var out = new PrintWriter(socket.getOutputStream(), true);
+                        out.println(Protocol.LIST_TOKEN);
+                    } catch (IOException e) {
+                        System.err.println("error in sending LIST request to Dstore: " + port + e);
+                    }
+                    
+                    System.out.println("waiting for LIST response from Dstore: " + port);
+                    try {
+                        var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                        var line = in.readLine();
+                        System.out.println(line + " received from Dstore: " + port);
+                        
+                        if (line == null) {
+                            System.out.println("Connection to Dstore " + port + " lost, "
+                                + "not waiting for LIST response");
+                            removeDstore(port);
+                            latches.get(Protocol.LIST_TOKEN).countDown();
+                        }
+                        
+                        var filesString = line.split(" ");
+                        assert filesString[0].equals(Protocol.LIST_TOKEN);
+                        var files = List.of(filesString).subList(1, filesString.length);
+                        fileList.addAll(files);
+                        dstoreFiles.put(port, new ArrayList<>(files));
+                        latches.get(Protocol.LIST_TOKEN).countDown();
+                        
+                    } catch (SocketTimeoutException e) {
+                        System.err.println("timeout in the LIST response from Dstore: " + port +
+                            ", DStore failed so removing it from index");
+                        latches.get(Protocol.LIST_TOKEN).countDown();
+                    } catch (AssertionError e) {
+                        System.err.println("DStore " + port + " sent an invalid LIST response: " + e
+                            + ", DStore failed so removing it from index");
+                        latches.get(Protocol.LIST_TOKEN).countDown();
+                    } catch (IOException e) {
+                        System.err.println(
+                            "error in receiving LIST response from Dstore: " + port + e);
+                        latches.get(Protocol.LIST_TOKEN).countDown();
+                    }
+                    
+                } catch (SocketException e) {
+                    System.err.println("error in setting the timeout for Dstore: " + port + e);
+                    latches.get(Protocol.LIST_TOKEN).countDown();
+                }
+            }).start();
+        }
+        
+        //wait for all Dstores to respond
+        try {
+            countdown.await();
+            System.out.println("all Dstores have responded to the LIST request");
+        } catch (InterruptedException e) {
+            System.err.println("error in waiting for the LIST countdown latch: " + e);
+            //TODO if we do need to abort, abort here
+        }
+        
+        //checking if more than r Dstores responded
+        if (dstoreFiles.size() < r) {
+            System.out.println("Not enough Dstores successfully responded to the LIST request");
+            // Rebalance aborted - threads are now free to handle requests
+            for (var thread : threads) {
+                thread.ongoingRebalance = false;
+            }
+            return;
+        }
+        
+        //revise file allocation
+        var fileAmounts = new HashMap<String, Integer>(); //count how many times each file is stored
+        for (var file : fileList) {
+            fileAmounts.put(file, fileAmounts.getOrDefault(file, 0) + 1);
+        }
+        
+        var distinctFileList = (ArrayList<String>) fileList.stream().distinct()
+            .toList(); //remove duplicates
+        
+        var fileToRemove = new ArrayList<String>(); //file to completely remove from the system
+        
+        //checking for files that are not in the index
+        for (var file : distinctFileList) {
+            if (!index.fileStatus.containsKey(file)) {
+                distinctFileList.remove(file);
+                fileAmounts.remove(file);
+                fileToRemove.add(file);
+            }
+        }
+        
+        //checking for files that are in removing status (failed remove operation)
+        var indexFilesInRemoving = index.fileStatus.entrySet().stream()
+            .filter(e -> e.getValue() == Status.REMOVING)
+            .map(Map.Entry::getKey)
+            .toList();
+        indexFilesInRemoving.forEach((file) -> {
+            distinctFileList.remove(file);
+            fileAmounts.remove(file);
+            fileToRemove.add(file);
+        });
+        
+        //checking for files in index but not in any Dstores
+        for (var file : index.fileStatus.keySet()) {
+            if (!distinctFileList.contains(file)) {
+                index.removeFileRemoveComplete(file); //remove from index
+            }
+        }
+        
+        //reviewing what files must we reduced/increased to reach the desired r
+        var fileToReduce = new HashMap<String, Integer>();
+        var fileToStore = new HashMap<String, Integer>();
+        for (var filePair : fileAmounts.entrySet()) {
+            if (filePair.getValue() > r) {
+                fileToReduce.put(filePair.getKey(), filePair.getValue() - r);
+            }
+            else if (filePair.getValue() < r) {
+                fileToStore.put(filePair.getKey(), r - filePair.getValue());
+            }
+        }
+        
+        var f = fileAmounts.size();
+        var d = num_Dstores;
+        // r
+        var maxNum = (int) Math.ceil((double) f * r / d);
+        var minNum = (int) Math.floor((double) f * r / d);
+        
+        //creating the DStore Pairs (files to send, files to remove)
+        // dstoreNum -> (files to send, files to remove)
+        // files to send = List<Pair<String,List<Integer>>> = list of pairs of file to send, list of ports to send to
+        // files to remove = List<String> = list of files to remove
+        var dstorePairs = new HashMap<Integer, Pair< ArrayList<Pair<String,ArrayList<Integer>>>, ArrayList<String> >>();
+        
+        //remove definitely
+        var dstoreToRemove = new HashMap<Integer, ArrayList<String>>();
+        for (var port : dstoreFiles.keySet()) {
+            var files = dstoreFiles.get(port);
+            var toRemove = new ArrayList<String>();
+            
+            for (var file : fileToRemove) {
+                if (files.contains(file)) {
+                    dstoreFiles.get(port).remove(file);
+                    toRemove.add(file);
+                }
+            }
+            dstoreToRemove.put(port, toRemove);
+        }
+        
+        //TODO remove this maybe as the below code should handle this
+        // "situation where file is still stored too many times"
+        //remove if dstore stores too many & file is stored too many times
+        for (var port : dstoreFiles.keySet()) {
+            //for each dstore, check if the files is stores more than the maxNum
+            for (var file : dstoreFiles.get(port)) {
+                if (fileToReduce.containsKey(file) &&
+                    fileToReduce.get(file) > 0  &&
+                    dstoreFiles.size() > maxNum) {
+                    
+                    fileToReduce.put(file, fileToReduce.get(file) - 1);
+                    dstoreFiles.get(port).remove(file);
+                    dstoreToRemove.get(port).add(file);
+                }
+            }
+        }
+        
+        // situation where file is still stored too many times
+        var toReduce = fileToReduce.entrySet().stream()
+            .filter(e -> e.getValue() > 0)
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        fileToReduce = (HashMap<String, Integer>) toReduce;
+        if (!fileToReduce.isEmpty()) {
+            for (var entry : fileToReduce.entrySet()) {
+                var file = entry.getKey();
+                var amount = entry.getValue();
+                
+                while (amount > 0) {
+                    var portsAscending = dstoreFiles.entrySet().stream()
+                        .filter(e -> e.getValue().contains(file))
+                        .sorted(Comparator.comparing(e -> e.getValue().size()))
+                        .map(Map.Entry::getKey)
+                        .toList();
+                    var ports = portsAscending.reversed();
+                    var port = ports.get(0);
+                    
+                    dstoreFiles.get(port).remove(file);
+                    dstoreToRemove.get(port).add(file);
+                    amount -= 1;
+                }
+                
+            }
+        }
+        
+        // situation where dstore still stores too many files
+        for (var dstorePair : dstoreFiles.entrySet()) {
+            var port = dstorePair.getKey();
+            var files = dstorePair.getValue();
+            
+            if (files.size() > maxNum) {
+                var toRemove = files.size() - maxNum;
+                for (int i = 0; i < toRemove; i++) {
+                    var filesAscending = files.stream()
+                        .sorted(Comparator.comparing(fileAmounts::get))
+                        .toList();
+                    var filesDescending = filesAscending.reversed();
+                    var file = filesDescending.get(0); //get the file which is stored the most
+                    
+                    //TODO maybe check if file only stored once
+                    
+                    fileToStore.merge(file, 1, Integer::sum);
+                    dstoreFiles.get(port).remove(file);
+                    dstoreToRemove.get(port).add(file);
+                }
+            }
+        }
+        
+        
+        //TODO technique
+        // sort the file that need to replicated MOST first
+        // then sort the dstores with the least files first
+        // algorithm to find from where the files should be sent from
+        
+        var dstoreToStore = new HashMap<Integer, ArrayList<Pair<String,ArrayList<Integer>>>>();
+        //fileToStore
+        //dstoreFiles -> length
+        for (var entry : fileToStore.entrySet()) {
+            var file = entry.getKey();
+            var amount = entry.getValue();
+            
+            for (int i = 0; i < amount; i++) {
+                var dstoreToRecieve = dstoreFiles.entrySet().stream()
+                    .filter(e -> !e.getValue().contains(file))
+                    .sorted(Comparator.comparing(e -> e.getValue().size()))
+                    .map(Map.Entry::getKey)
+                    .toList()
+                    .getFirst();
+                
+                var dstoreToSend = dstoreFiles.entrySet().stream()
+                    .filter(e -> e.getValue().contains(file))
+                    .map(Map.Entry::getKey)
+                    .toList()
+                    .getFirst();
+                
+                if (dstoreToStore.get(dstoreToSend) == null) {
+                    var listToSendPorts = new ArrayList<>(List.of(dstoreToRecieve));
+                    var pair = new Pair<>(file, listToSendPorts);
+                    var list = new ArrayList<>(List.of(pair));
+                    dstoreToStore.put(dstoreToSend, list);
+                } else {
+                    var list = dstoreToStore.get(dstoreToSend);
+                    var pair = list.stream().filter(p -> p.getFirst().equals(file)).toList().getFirst();
+                    if (pair == null) {
+                        var listToSendPorts = new ArrayList<>(List.of(dstoreToRecieve));
+                        var newPair = new Pair<>(file, listToSendPorts);
+                        list.add(newPair);
+                    } else {
+                        pair.getSecond().add(dstoreToRecieve);
+                    }
+                }
+                dstoreFiles.get(dstoreToRecieve).add(file);
+            }
+        }
+        
+        
+        //Join two maps to create the pairs
+        //dstorePairs = dstoreToStore + dstoreToRemove
+        var entries = new HashSet<Integer>();
+        entries.addAll(dstoreToStore.keySet());
+        entries.addAll(dstoreToRemove.keySet());
+        for (var entry : entries) {
+            var toStore = dstoreToStore.get(entry);
+            var toRemove = dstoreToRemove.get(entry);
+            var pair = new Pair<>(toStore, toRemove);
+            dstorePairs.put(entry, pair);
+        }
+        
+        //set up the countdown latch for the REBALANCE_COMPLETE
+        System.out.println("setting up the countdown latch for REBALANCE_COMPLETE");
+        countdown = new CountDownLatch(dstorePairs.size()); //countdown latch
+        
+        //creating latch for the STORE_ACK
+        latches.put(Protocol.REMOVE_COMPLETE_TOKEN, countdown);
+        
+        //sending the rebalance request to the Dstores
+        for (var entry : dstorePairs.entrySet()) {
+            var dstore = entry.getKey();
+            var pair = entry.getValue();
+            
+            //TODO consider null values?
+            //extracting the data
+            var toStore = pair.getFirst();
+            var amountToStore = toStore.size();
+            var toRemove = pair.getSecond();
+            var amountToRemove = toRemove.size();
+            
+            //creating the string to send to Dstore
+            var messageBuilder = new StringBuilder(
+                Protocol.REBALANCE_TOKEN + " " + amountToStore);
+            for (var filePair : toStore) { //adding the files to send to other dstores
+                var file = filePair.getFirst();
+                var ports = filePair.getSecond();
+                messageBuilder.append(" ").append(file).append(" ").append(ports.size());
+                for (var port : ports) {
+                    messageBuilder.append(" ").append(port);
+                }
+            }
+            messageBuilder.append(" ").append(amountToRemove);
+            for (var file : toRemove) { //adding the files to remove from dstore
+                messageBuilder.append(" ").append(file);
+            }
+            var message = messageBuilder.toString();
+            
+            //sending the request to the Dstore
+            new Thread(() -> {
+                try {
+                    var socket = dstoreSockets.get(dstore);
+                    socket.setSoTimeout(timeout);
+                    
+                    System.out.println("Sending (" + message + ") to Dstore: " + dstore);
+                    try {
+                        var out = new PrintWriter(socket.getOutputStream(), true);
+                        out.println(message);
+                    } catch (IOException e) {
+                        System.err.println("error in sending REBALANCE request to Dstore: " + dstore + e);
+                    }
+                    
+                    System.out.println("waiting for REBALANCE_COMPLETE response from Dstore: " + dstore);
+                    try {
+                        var in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                        var line = in.readLine();
+                        System.out.println(line + " received from Dstore: " + dstore);
+                        
+                        if (line == null) {
+                            System.out.println("Connection to Dstore " + dstore + " lost, "
+                                + "not waiting for REBALANCE_COMPLETE response");
+                            removeDstore(dstore);
+                            rebalanceThread.interrupt();
+                        } else if (!line.equals(Protocol.REBALANCE_COMPLETE_TOKEN)) {
+                            System.err.println("DStore " + dstore + " sent an invalid REBALANCE_COMPLETE response: " + line);
+                            rebalanceThread.interrupt();
+                        } else {
+                            latches.get(Protocol.REBALANCE_COMPLETE_TOKEN).countDown();
+                        }
+                        
+                    } catch (SocketTimeoutException e) {
+                        System.err.println("timeout in the REBALANCE_COMPLETE response from Dstore: " + dstore);
+                        rebalanceThread.interrupt();
+                    }  catch (IOException e) {
+                        System.err.println(
+                            "error in receiving REBALANCE_COMPLETE response from Dstore: " + dstore + e);
+                        rebalanceThread.interrupt();
+                    }
+                    
+                } catch (SocketException e) {
+                    System.err.println("error in setting the timeout for Dstore: " + dstore + e);
+                    rebalanceThread.interrupt();
+                }
+            });
+            
+        }
+        
+        //waiting for responses from the Dstores
+        try {
+            countdown.await();
+            System.out.println("all Dstores have responded to the REBALANCE request, updating Index");
+            index.update(dstoreFiles);
+        } catch (InterruptedException e) {
+            System.err.println("Rebalance Thread Interrupted, aborting operation: " + e);
+        }
+        
+        // Rebalance complete - threads are now free to handle requests
+        for (var thread : threads) {
+            thread.ongoingRebalance = false;
+        }
+    }
+    
+    private static void removeDstore(int port) {
+        new Thread(() -> index.removePort(port)).start();
+        num_Dstores -= 1;
+        dstoreSockets.remove(port);
+    }
+    
+    static class ServiceThread extends Thread {
         
         Socket client;
+        boolean ongoingRebalance = false;
+        boolean ongoingCriticalOperation = false;
+        
+        Queue<String> requests = new LinkedList<>();
         
         ServiceThread(Socket c) {
             client = c;
@@ -496,8 +953,25 @@ public class Controller {
                 String line;
                 boolean isDstore = false;
                 
-                while ((line = in.readLine()) != null) {
+                while ((line = in.readLine()) != null || (!requests.isEmpty() && !this.ongoingRebalance)) {
+                    
+                    if (!requests.isEmpty() && !this.ongoingRebalance) {
+                        System.out.println("Queue not empty, handling requests");
+                        for (var request : requests) {
+                            handleRequest(request, client);
+                        }
+                        requests.clear();
+                        if (line == null) {
+                            continue;
+                        }
+                    }
+                    
                     System.out.println(line + " received");
+                    if (this.ongoingRebalance) {
+                        System.out.println("Rebalance ongoing, adding request to queue");
+                        requests.add(line);
+                        continue;
+                    }
                     
                     if (line.split(" ")[0].equals(Protocol.JOIN_TOKEN)) {
                         handleRequest(line, client);
@@ -506,6 +980,7 @@ public class Controller {
                     }
                     
                     handleRequest(line, client);
+                    ongoingCriticalOperation = false;
                 }
                 
                 if (!isDstore) { //if the client is not a Dstore then close connection
@@ -522,6 +997,7 @@ public class Controller {
     // command prompt: java Controller cport R timeout rebalance_period
     // test command prompt: java Controller 4321 1 2000 10000
     // client command prompt: java -cp client.jar:. ClientMain 4321 1000
+    // client compile: javac -cp client.jar ClientMain.java
     public static void main(String[] args) {
         //TODO validate arguments
         int cport = Integer.parseInt(args[0]);
