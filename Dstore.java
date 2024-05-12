@@ -8,12 +8,15 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashMap;
+import java.util.Map;
 
 public class Dstore {
     int port;
     int cport;
     int timeout;
     String file_folder;
+    Map<String,Integer> fileSizes;
     Socket controllerSocket;
     
     public Dstore(int port, int cport, int timeout, String file_folder) {
@@ -21,6 +24,7 @@ public class Dstore {
         this.cport = cport;
         this.timeout = timeout;
         this.file_folder = file_folder;
+        this.fileSizes = new HashMap<>();
     }
     
     public void start() {
@@ -77,7 +81,6 @@ public class Dstore {
     }
     
     public void handleRequest(String request, Socket client) {
-        //TODO handle the request
         var requestWords = request.split(" ");
         
         if (requestWords[0].equals(Protocol.STORE_TOKEN)) {
@@ -108,6 +111,7 @@ public class Dstore {
             //saving the file
             try {
                 System.out.println("saving the file");
+                fileSizes.put(fileName, fileSize);
                 var out = new FileOutputStream(file_folder + "/" + fileName);
                 out.write(buffer);
                 
@@ -142,7 +146,9 @@ public class Dstore {
                     return;
                 }
                 
-                var buffer = new byte[(int) in.length()];
+                var fileSize = fileSizes.get(fileName);
+                
+                var buffer = new byte[fileSize];
                 var fis = new FileInputStream(in);
                 fis.read(buffer);
                 fis.close();
@@ -172,6 +178,128 @@ public class Dstore {
                 
             } catch (IOException e) {
                 System.out.println("error removing the file: " + e);
+            }
+            
+        }
+        else if (requestWords[0].equals(Protocol.REBALANCE_TOKEN)) {
+            System.out.println("REBALANCE request received");
+            var counter = 1;
+            
+            //sending the files
+            var filesToSendAmount = Integer.parseInt(requestWords[counter]);
+            counter++;
+            for (int i = 0; i < filesToSendAmount; i++) {
+                var fileName = requestWords[counter];
+                counter++;
+                
+                var file = new File(file_folder + "/" + fileName);
+                
+                if (!file.exists()) {
+                    System.err.println("file does not exist: " + fileName);
+                    continue;
+                }
+                
+                var fileSize = fileSizes.get(fileName);
+                
+                var dstoresToSendAmount = Integer.parseInt(requestWords[counter]);
+                counter++;
+                
+                for (int j = 0; j < dstoresToSendAmount; j++) {
+                    var dstorePort = Integer.parseInt(requestWords[counter]);
+                    counter++;
+                    try {
+                        var socket = new Socket(InetAddress.getLocalHost(), dstorePort);
+                        var printer = new PrintWriter(socket.getOutputStream(), true);
+                        var reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                        var out = socket.getOutputStream();
+                        
+                        //sending Rebalance_Store message
+                        System.out.println("sending REBALANCE_STORE to Dstore: " + dstorePort);
+                        printer.println(Protocol.REBALANCE_STORE_TOKEN + " " + fileName + " " + fileSize);
+                        
+                        //receiving ack
+                        var line = reader.readLine();
+                        System.out.println("received: " + line + " from Dstore: " + dstorePort);
+                        if (!line.equals(Protocol.ACK_TOKEN)) {
+                            System.err.println("Did not receive ACK from Dstore: " + dstorePort);
+                            continue;
+                        }
+                        
+                        //sending the file
+                        System.out.println("sending the file " + fileName + " to the Dstore: " + dstorePort);
+                        var buffer = new byte[fileSize];
+                        var fis = new FileInputStream(file);
+                        fis.read(buffer);
+                        fis.close();
+                        out.write(buffer);
+                    
+                    } catch (Exception e) {
+                        System.out.println("error connecting to Dstore: " + dstorePort + "\n" + e);
+                    }
+                }
+            }
+            
+            //removing the files
+            var filesToRemoveAmount = Integer.parseInt(requestWords[counter]);
+            counter++;
+            for (int i = 0; i < filesToRemoveAmount; i++) {
+                var fileName = requestWords[counter];
+                counter++;
+                
+                var file = new File(file_folder + "/" + fileName);
+                
+                if (!file.exists()) {
+                    System.err.println("file does not exist: " + fileName);
+                    continue;
+                }
+                
+                file.delete();
+            }
+            
+            //sending REBALANCE_COMPLETE
+            try {
+                var out = new PrintWriter(controllerSocket.getOutputStream(), true);
+                out.println(Protocol.REBALANCE_COMPLETE_TOKEN);
+            } catch (Exception e) {
+                System.out.println("error sending REBALANCE_COMPLETE: " + e);
+            }
+            
+        }
+        else if (requestWords[0].equals(Protocol.REBALANCE_STORE_TOKEN)) {
+            System.out.println("REBALANCE_STORE request received");
+            
+            var fileName = requestWords[1];
+            var fileSize = Integer.parseInt(requestWords[2]);
+            
+            //sending ACK
+            try {
+                System.out.println("sending ACK to Dstore");
+                PrintWriter out = new PrintWriter(client.getOutputStream(), true);
+                out.println(Protocol.ACK_TOKEN);
+            } catch (Exception e) {
+                System.out.println("error sending ACK: " + e);
+            }
+            
+            //receiving the file
+            var buffer = new byte[fileSize];
+            try {
+                System.out.println("receiving the file from the dstore");
+                var in = client.getInputStream();
+                buffer = in.readNBytes(fileSize);
+            } catch (Exception e) {
+                System.out.println("error receiving the file: " + e);
+            }
+            
+            //saving the file
+            try {
+                System.out.println("saving the file");
+                fileSizes.put(fileName, fileSize);
+                var out = new FileOutputStream(file_folder + "/" + fileName);
+                out.write(buffer);
+                
+                out.close(); //close the file stream
+            } catch (Exception e) {
+                System.out.println("error saving the file: " + e);
             }
             
         }
