@@ -303,6 +303,27 @@ public class Dstore {
             }
             
         }
+        else if (requestWords[0].equals(Protocol.LIST_TOKEN)) {
+            System.out.println("LIST request received");
+            
+            var files = new File(file_folder).list();
+            try {
+                assert files != null;
+                var out = new PrintWriter(controllerSocket.getOutputStream(), true);
+                //creating the list of files message
+                var messageBuilder = new StringBuilder();
+                messageBuilder.append(Protocol.LIST_TOKEN);
+                for (var file : files) {
+                    messageBuilder.append(" ");
+                    messageBuilder.append(file);
+                }
+                var message = messageBuilder.toString();
+                out.println(message);
+                
+            } catch (Exception e) {
+                System.out.println("error sending the file list to Controller: " + e);
+            }
+        }
         else {
             System.out.println("unknown request received: " + request);
         }
