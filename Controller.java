@@ -118,7 +118,8 @@ public class Controller {
                 rebalanceTask.run();
                 rebalanceTimer.scheduleAtFixedRate(rebalanceTask, 0, rebalance_period);
             }
-        } else if (requestWords[0].equals(Protocol.STORE_TOKEN)) {
+        }
+        else if (requestWords[0].equals(Protocol.STORE_TOKEN)) {
             System.out.println("STORE request received");
             var thread = (ServiceThread) Thread.currentThread();
             thread.ongoingCriticalOperation = true;
