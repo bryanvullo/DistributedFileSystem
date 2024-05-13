@@ -517,14 +517,6 @@ public class Controller {
     }
     
     public void rebalance() {
-        //TODO implement rebalancing
-        // pre. wait for all ongoing store/remove operations to finish [/]
-        // 1. list sent to all dstores [/]
-        // 2. revise file allocation
-        //  2.1. if file in index but not in dstores, remove from index
-        //  2.2. if file in dstore but not in index, remove from dstore
-        // 3. tell dstores to send/remove files
-        // 4. Dstores do their thing and wait for acks (if no complete acks, timeout, next rebalance)
         
         if (num_Dstores < r) {
             System.out.println("Not enough Dstores to Rebalance");
@@ -556,6 +548,12 @@ public class Controller {
                 try {
                     var socket = dstoreSockets.get(port);
                     socket.setSoTimeout(timeout);
+                    if (socket.isClosed()) {
+                        System.out.println("Connection to Dstore " + port + " lost, "
+                            + "not sending LIST request");
+                        removeDstore(port);
+                        latches.get(Protocol.LIST_TOKEN).countDown();
+                    }
                     
                     System.out.println("sending LIST request to Dstore: " + port);
                     try {
@@ -586,16 +584,13 @@ public class Controller {
                         latches.get(Protocol.LIST_TOKEN).countDown();
                         
                     } catch (SocketTimeoutException e) {
-                        System.err.println("timeout in the LIST response from Dstore: " + port +
-                            ", DStore failed so removing it from index");
+                        System.err.println("timeout in the LIST response from Dstore: " + port);
                         latches.get(Protocol.LIST_TOKEN).countDown();
                     } catch (AssertionError e) {
-                        System.err.println("DStore " + port + " sent an invalid LIST response: " + e
-                            + ", DStore failed so removing it from index");
+                        System.err.println("DStore " + port + " sent an invalid LIST response: " + e);
                         latches.get(Protocol.LIST_TOKEN).countDown();
                     } catch (IOException e) {
-                        System.err.println(
-                            "error in receiving LIST response from Dstore: " + port + e);
+                        System.err.println("error in receiving LIST response from Dstore: " + port + e);
                         latches.get(Protocol.LIST_TOKEN).countDown();
                     }
                     
@@ -612,7 +607,6 @@ public class Controller {
             System.out.println("all Dstores have responded to the LIST request");
         } catch (InterruptedException e) {
             System.err.println("error in waiting for the LIST countdown latch: " + e);
-            //TODO if we do need to abort, abort here
         }
         
         //checking if more than r Dstores responded
@@ -676,7 +670,7 @@ public class Controller {
         }
         
         var f = fileAmounts.size();
-        var d = num_Dstores;
+        var d = dstoreFiles.size();
         // r
         var maxNum = (int) Math.ceil((double) f * r / d);
         var minNum = (int) Math.floor((double) f * r / d);
@@ -770,7 +764,7 @@ public class Controller {
         }
         
         
-        //TODO technique
+        //technique
         // sort the file that need to replicated MOST first
         // then sort the dstores with the least files first
         // algorithm to find from where the files should be sent from
@@ -824,7 +818,9 @@ public class Controller {
         entries.addAll(dstoreToRemove.keySet());
         for (var entry : entries) {
             var toStore = dstoreToStore.get(entry);
+            toStore = toStore == null ? new ArrayList<>() : toStore;
             var toRemove = dstoreToRemove.get(entry);
+            toRemove = toRemove == null ? new ArrayList<>() : toRemove;
             var pair = new Pair<>(toStore, toRemove);
             dstorePairs.put(entry, pair);
         }
@@ -841,7 +837,6 @@ public class Controller {
             var dstore = entry.getKey();
             var pair = entry.getValue();
             
-            //TODO consider null values?
             //extracting the data
             var toStore = pair.getFirst();
             var amountToStore = toStore.size();
@@ -920,7 +915,7 @@ public class Controller {
             System.out.println("all Dstores have responded to the REBALANCE request, updating Index");
             index.update(dstoreFiles);
         } catch (InterruptedException e) {
-            System.err.println("Rebalance Thread Interrupted, aborting operation: " + e);
+            System.err.println("Rebalance Thread Interrupted, not updating the Index: " + e);
         }
         
         // Rebalance complete - threads are now free to handle requests

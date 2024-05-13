@@ -209,6 +209,7 @@ public class Dstore {
                     counter++;
                     try {
                         var socket = new Socket(InetAddress.getLocalHost(), dstorePort);
+                        socket.setSoTimeout(timeout);
                         var printer = new PrintWriter(socket.getOutputStream(), true);
                         var reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                         var out = socket.getOutputStream();
@@ -278,16 +279,19 @@ public class Dstore {
                 out.println(Protocol.ACK_TOKEN);
             } catch (Exception e) {
                 System.out.println("error sending ACK: " + e);
+                return;
             }
             
             //receiving the file
             var buffer = new byte[fileSize];
             try {
+                client.setSoTimeout(timeout);
                 System.out.println("receiving the file from the dstore");
                 var in = client.getInputStream();
                 buffer = in.readNBytes(fileSize);
             } catch (Exception e) {
                 System.out.println("error receiving the file: " + e);
+                return;
             }
             
             //saving the file
